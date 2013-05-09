@@ -6,24 +6,30 @@ GLOBAL.hostTestName = 'check_fail2ban';
 
 var defaultPeriod = 10;
 var defaultUnits = 'hours';
-var TERMINAL_ERROR = 1400;
+var errorthreshold = 1400;	//threshold for errored host
 var NOW = new Date().toISOString();
 
 var configBase;
 if (process.env.DEVOPSCONFIG) {
-	configbase = process.env.DEVOPSCONFIG;
+	configBase = process.env.DEVOPSCONFIG;
 } else {
 	configBase = process.cwd() + '/config/';
 }	
 
 try {
-	require(configBase + '/localConfig.js');
+	require(configBase + 'localConfig.js');
 } catch (e) {
-	throw 'Could not require localConfig.js. Define DEVOPSCONFIG or run this program from its parent directory.';
+	throw 'Could not require "' + configBase + '/localConfig.js" — define DEVOPSCONFIG or run this program from its parent directory.';
 }
 
-var flatHostsFile = configBase + GLOBAL.CONFIG.flatHostsFile;
-GLOBAL.MIN_EDGES = GLOBAL.CONFIG.minEdges || 6;
+if (!GLOBAL.CONFIG.minActive) {
+	throw "minActive not defined";
+}
+
+var flatHostsFile = null;
+if (GLOBAL.CONFIG.flatHostsFile) {
+	flatHostsFile = (GLOBAL.CONFIG.flatHostsFile.substring(0, 1) === '/' ? '' : configBase) + GLOBAL.CONFIG.flatHostsFile;
+}	
 
 var hostsFile = configBase + 'hosts.json';
 
@@ -42,13 +48,12 @@ program
   .option('-f, --offline <host>', 'offline for maintenance')
   .option('-a, --activate <host>', ' make host active')
   .option('-d, --deactivate <host>', 'make host inactive')
-  .option('-g, --advice [' + defaultPeriod + ']', 'rotation advice [10]')
-  .option('-r, --rotate [' + defaultPeriod + ']', 'do auto-rotation [10]')
+  .option('-g, --advice [' + defaultUnits + ']', 'rotation advice [' + defaultPeriod + ']')
+  .option('-r, --rotate [' + defaultUnits + ']', 'do auto-rotation [' + defaultPeriod + ']')
   .option('-t, --testhost <host>', 'live test host')
   .option('-q, --query <host> [period]', 'query host test results')
   .option('-v --verbose', 'verbose output')
   .option('--writeall <file>', 'write all hosts to a flat file')
-  .option('-z, --zonegen', 'execute zongene script')
   .option('-s --stats', 'current statistics')
 
   .option('--override', 'override validation error')
@@ -67,6 +72,10 @@ program.on('--help', function() {
 program.parse(process.argv);
 
 var verbose = program.verbose === true;
+
+if (verbose) {
+	console.log('configBase is "' + configBase + '", flatHostsFile is "' + flatHostsFile + '"');
+}
 
 if (program.add) {
 	mustComment();
@@ -130,6 +139,10 @@ if (program.testhost) {
 	check.checkEdge(program.testhost, test, GLOBAL.hostTestName, utils.getTick(), function(res) {
 		console.log(res);
 	});
+}
+
+if (program.query) {
+	console.log(getHostSummaries());
 }
 
 if (program.stats) {
@@ -353,22 +366,36 @@ function getRotateAdvice(stats) {
 		}
 	}
 	
-	if (!addInactive && lowestError && lowestError.erroWeight < TERMINAL_ERROR) {
+	if (!addInactive && lowestError && lowestError.erroWeight < errorthreshold) {
 		addReason = 'low error';
 		addInactive = { name : lowestError, stats : summaries.inactiveHosts[lowestError]};
 	}
 	
 	return {removeActive : removeActive, addInactive : addInactive, removeReason : removeReason, addReason : addReason
-		, summary : 'replaced ' + removeActive.name + ' ' + removeActive.stats.since +  ' [' + removeReason + '] w ' + addInactive.name + ' ' + addInactive.stats.since + ' [' + addReason + ']'};
+		, summary : 'replace ' + removeActive.name + ' ' + removeActive.stats.since +  ' [' + removeReason + '] w ' + addInactive.name + ' ' + addInactive.stats.since + ' [' + addReason + ']'};
 }
 
 function validateConfiguration(hosts) {	// make sure the resulting config makes sense
 	var stats = getHostSummaries(hosts);
-	if (stats.active < GLOBAL.MIN_EDGES) {
+	if (stats.active < GLOBAL.CONFIG.minActive) {
 		if (program.override) {
 			console.log("overridding required hosts");
 		} else {
-			throw "not enough available hosts; " + stats.active + ' (required: ' + GLOBAL.MIN_EDGES + ')';
+			throw "not enough active hosts; " + stats.active + ' (required: ' + GLOBAL.CONFIG.minActive + ')';
+		}
+	}
+	if (GLOBAL.CONFIG.constantActive && stats.active != GLOBAL.CONFIG.constantActive) {
+		if (program.override) {
+			console.log("overridding required constant active");
+		} else {
+			throw "active hosts not required number; " + stats.active + ' (required: ' + GLOBAL.CONFIG.constantActive + ')';
+		}
+	}
+	if (GLOBAL.CONFIG.minInactive  && stats.inactive < GLOBAL.CONFIG.minInactive) {
+		if (program.override) {
+			console.log("overridding required inactive");
+		} else {
+			throw "not enough inactive hosts; " + stats.inactive + ' (required: ' + GLOBAL.CONFIG.minInactive + ')';
 		}
 	}
 }
@@ -413,7 +440,7 @@ function getHostSummaries(hosts) {
 		inactiveHosts[hosts[h].name_s] = { inactive_dt : host.inactive_dt, since : moment(host.inactive_dt).fromNow(), comment : hosts[h].comment_s };
 	}
   }
-  return { total : total, active : active, activeHosts: activeHosts, inactive : inactive, inactiveHosts: inactiveHosts, available : available, unavailable : unavailable, offline : offline, offlineHosts: offlineHosts, required : GLOBAL.MIN_EDGES};
+  return { total : total, active : active, activeHosts: activeHosts, inactive : inactive, inactiveHosts: inactiveHosts, available : available, unavailable : unavailable, offline : offline, offlineHosts: offlineHosts, required : GLOBAL.CONFIG.minActive};
 }
 
 /** get host and updated hosts. retrieves hosts if not passed. **/
@@ -513,8 +540,14 @@ function isOffline(host) {
 	return host.offline_b;
 }
 
+/** 
+ * 
+ * Host is eligble to be active
+ * 
+ */
+
 function isAvailable(host) {
-	return (!isInactive(host) && !isOffline(host));
+	return (!isOffline(host));
 }
 
 function getStats(num, callback) {
@@ -577,7 +610,7 @@ function getStats(num, callback) {
 				maxCount = hostSummary['resultCount'];
 	        }
 			if (doc.error_t) {
-				var w = Math.round(moment().diff(doc['tickDate_dt']) / 10000);	// decreases based on time; recent is ~1400 - TERMINAL_ERROR
+				var w = Math.round(moment().diff(doc['tickDate_dt']) / 10000);	// decreases based on time; recent is ~1400 - errorthreshold
 				if (verbose) {
 					console.log(host + ': ' + doc.error_t.replace('CHECK_NRPE: ', '').trim() + ' ' + doc.tickDate_dt + ' errorWeight', w);
 				}
