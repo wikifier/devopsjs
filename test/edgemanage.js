@@ -19,7 +19,7 @@ var mockSolr = {
 	}
 }
 
-var program = {};
+var program = {verbose:0};
 
 GLOBAL.CONFIG = { minActive: 6, flatHostsFile : 'edges.test', solrConfig : { host: 'testinghost', core: 'testingcore'} }
 
@@ -27,7 +27,7 @@ var testHostsFile = process.cwd() + '/test/work/testHosts.json';
 fs.writeFileSync(testHostsFile, JSON.stringify(getTestHosts(), null, 2));
 
 var expect = require('chai').expect,
-	hostLib = require('../src/node/lib/hosts.js').setConfig(program, testHostsFile, 1, mockSolr);
+	hostLib = require('../src/node/lib/hosts.js').setConfig(program, testHostsFile, mockSolr);
 	
 suite("edgemanage tests", function() {
 	
@@ -42,7 +42,7 @@ suite("edgemanage tests", function() {
 	    expect(excepted).to.be.true;
 	});
 	
-	test("add", function() {
+	test("add", function(done) {
 		var newHost = 'testAdd';
 		var hp = hostLib.addHost(newHost);
 		hostLib.writeHosts(hp.hosts, program.add);
@@ -54,26 +54,27 @@ suite("edgemanage tests", function() {
 				found = hosts[h];
 			}
 		}
-		expect(found).is.not.null;
+    expect(found).is.not.null;
+    done();
 	});
 
-	test("remove",function() {
+	test("remove",function(done) {
 		var remHost = 'testAdd';
 		var logCall = false;
-		var hp = hostLib.removeHost(remHost, null, null);
+		var hp = hostLib.removeHost(remHost);
 		hostLib.writeHosts(hp.hosts, remHost);
 		var hosts = hostLib.getHosts();
-		console.log(hp.hosts, hosts);
-		var found = null;
 
+		var found = null;
+		
 		for (var h in hosts) {
-			console.log(hosts[h].name_s)
 			if (hosts[h].name_s === remHost) {
 				found = hosts[h];
 			}
 		}
-		expect(found).is.null;
-		expect(logCall).is.true;
+    expect(found).is.null;
+    expect(logCall).is.true;
+    done();
 	});
 
 	test("flat hosts file", function() {
