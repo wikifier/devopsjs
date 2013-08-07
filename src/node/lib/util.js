@@ -5,11 +5,11 @@ exports.getTick = function() {
 /**
 *
 * Loads configuration based on current environmental setting of DEVOPSCONFIG base. 
-* sets DEVOPS_DEBUG 
+* checks for DEVOPS_DEBUG 
 *
 **/
 
-var configBase;
+var configBase, store;
 
 exports.getConfigBase = function() {
   return configBase;
@@ -40,6 +40,9 @@ exports.config = function() {
 
   } catch (e) {
     throw 'Could not require "' + configBase + '/localConfig.js" — define DEVOPSCONFIG or run this program from its parent directory.';
+  }
+  GLOBAL.CONFIG.getStore = function() {
+    return store || require('./elasticSearchStore.js');
   }
 }
 
